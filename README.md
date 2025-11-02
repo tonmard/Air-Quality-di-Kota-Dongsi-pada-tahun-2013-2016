@@ -39,3 +39,10 @@ pip install -r requirements.txt
 ## ⚙️ Jalankan Dashboard Streamlit
 
 streamlit run streamlit run dashboard.py
+
+---
+
+## 🔗 Link Dashboard
+
+
+https://air-quality-di-kota-dongsi-pada-tahun-2013-2016.streamlit.app/
