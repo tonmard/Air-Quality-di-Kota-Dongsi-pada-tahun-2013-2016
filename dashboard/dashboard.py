@@ -43,7 +43,22 @@ def create_pollutant_mean_df(df, time_level="year", pollutant_cols=None):
     return res
 
 # Load dataset
-all_df = pd.read_csv("Airflow_Dongsi.csv")
+# Lokasi dataset relatif terhadap file dashboard.py
+DATA_PATH = Path(__file__).parent / "Airflow_Dongsi.csv"
+
+# Kalau file belum ada (misal saat deploy di Streamlit Cloud),
+# fallback ke URL raw GitHub agar tetap bisa dijalankan
+if not DATA_PATH.exists():
+    st.warning("Dataset lokal tidak ditemukan. Mengunduh dari GitHub...")
+    DATA_URL = "https://raw.githubusercontent.com/tonmard/Air-Quality-di-Kota-Dongsi-pada-tahun-2013-2016/main/dashboard/Airflow_Dongsi.csv"
+    try:
+        all_df = pd.read_csv(DATA_URL)
+        st.success("Berhasil memuat dataset dari GitHub (versi online).")
+    except Exception as e:
+        st.error(f"Gagal memuat dataset dari GitHub: {e}")
+        st.stop()
+else:
+    all_df = pd.read_csv(DATA_PATH)
 
 # sort dan reset index
 all_df = all_df.sort_values("datetime").reset_index(drop=True)

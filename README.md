@@ -37,4 +37,4 @@ pip install -r requirements.txt
 
 ## ⚙️ Jalankan Dashboard Streamlit
 
-streamlit run dashboard.py
+streamlit run streamlit run ./dashboard/dashboard.py
