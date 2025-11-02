@@ -28,6 +28,7 @@ pip install -r requirements.txt
 
 mkdir air_quality_dashboard
 cd air_quality_dashboard
+cd dashboard
 pip install pipenv
 pipenv install
 pipenv shell
@@ -37,4 +38,4 @@ pip install -r requirements.txt
 
 ## ⚙️ Jalankan Dashboard Streamlit
 
-streamlit run streamlit run ./dashboard/dashboard.py
+streamlit run streamlit run dashboard.py
