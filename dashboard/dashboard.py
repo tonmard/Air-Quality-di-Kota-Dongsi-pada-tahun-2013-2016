@@ -1,262 +1,171 @@
+# dashboard.py
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import streamlit as st
-from babel.numbers import format_currency
+from pathlib import Path
 
-sns.set(style='dark')
+sns.set(style='darkgrid')
+st.set_page_config(page_title="Air Quality Dongsi 2013-2016", layout="wide")
 
-# Helper function yang dibutuhkan untuk menyiapkan berbagai dataframe
+# Fungsi rata-rata polutan
+def create_pollutant_mean_df(df, time_level="year", pollutant_cols=None):
+    if "datetime" not in df.columns:
+        if all(c in df.columns for c in ["year","month","day","hour"]):
+            df = df.copy()
+            df["datetime"] = pd.to_datetime(df[["year","month","day","hour"]], errors="coerce")
+        elif all(c in df.columns for c in ["year","month","day"]):
+            df = df.copy()
+            df["datetime"] = pd.to_datetime(df[["year","month","day"]], errors="coerce")
+        else:
+            raise ValueError("Tidak menemukan kolom datetime atau komponen waktu year/month/day[(hour)].")
 
-def create_daily_orders_df(df):
-    daily_orders_df = df.resample(rule='D', on='order_date').agg({
-        "order_id": "nunique",
-        "total_price": "sum"
-    })
-    daily_orders_df = daily_orders_df.reset_index()
-    daily_orders_df.rename(columns={
-        "order_id": "order_count",
-        "total_price": "revenue"
-    }, inplace=True)
-    
-    return daily_orders_df
+    df2 = df.copy()
+    df2["datetime"] = pd.to_datetime(df2["datetime"], errors="coerce")
+    df2 = df2.dropna(subset=["datetime"])
 
-def create_sum_order_items_df(df):
-    sum_order_items_df = df.groupby("product_name").quantity_x.sum().sort_values(ascending=False).reset_index()
-    return sum_order_items_df
+    rule_map = {"hour":"H", "day":"D", "month":"M", "year":"Y"}
+    if time_level not in rule_map:
+        raise ValueError("time_level harus salah satu dari: 'hour','day','month','year'")
 
-def create_bygender_df(df):
-    bygender_df = df.groupby(by="gender").customer_id.nunique().reset_index()
-    bygender_df.rename(columns={
-        "customer_id": "customer_count"
-    }, inplace=True)
-    
-    return bygender_df
+    possible = ["PM2.5","PM10","SO2","NO2","CO","O3"]
+    if pollutant_cols is None:
+        pollutant_cols = [c for c in possible if c in df2.columns]
+    else:
+        pollutant_cols = [c for c in pollutant_cols if c in df2.columns]
 
-def create_byage_df(df):
-    byage_df = df.groupby(by="age_group").customer_id.nunique().reset_index()
-    byage_df.rename(columns={
-        "customer_id": "customer_count"
-    }, inplace=True)
-    byage_df['age_group'] = pd.Categorical(byage_df['age_group'], ["Youth", "Adults", "Seniors"])
-    
-    return byage_df
+    if not pollutant_cols:
+        raise ValueError("Tidak ada kolom polutan ditemukan di dataset.")
 
-def create_bystate_df(df):
-    bystate_df = df.groupby(by="state").customer_id.nunique().reset_index()
-    bystate_df.rename(columns={
-        "customer_id": "customer_count"
-    }, inplace=True)
-    
-    return bystate_df
+    df2 = df2.set_index("datetime")
+    res = df2[pollutant_cols].resample(rule_map[time_level]).mean().reset_index()
+    res.rename(columns={c:f"{c}_mean" for c in pollutant_cols}, inplace=True)
+    return res
 
-def create_rfm_df(df):
-    rfm_df = df.groupby(by="customer_id", as_index=False).agg({
-        "order_date": "max", #mengambil tanggal order terakhir
-        "order_id": "nunique",
-        "total_price": "sum"
-    })
-    rfm_df.columns = ["customer_id", "max_order_timestamp", "frequency", "monetary"]
-    
-    rfm_df["max_order_timestamp"] = rfm_df["max_order_timestamp"].dt.date
-    recent_date = df["order_date"].dt.date.max()
-    rfm_df["recency"] = rfm_df["max_order_timestamp"].apply(lambda x: (recent_date - x).days)
-    rfm_df.drop("max_order_timestamp", axis=1, inplace=True)
-    
-    return rfm_df
+# Load dataset
+all_df = pd.read_csv("Airflow_Dongsi.csv")
 
-# Load cleaned data
-all_df = pd.read_csv("all_data.csv")
+# sort dan reset index
+all_df = all_df.sort_values("datetime").reset_index(drop=True)
+all_df["datetime"] = pd.to_datetime(all_df["datetime"], errors="coerce")
 
-datetime_columns = ["order_date", "delivery_date"]
-all_df.sort_values(by="order_date", inplace=True)
-all_df.reset_index(inplace=True)
-
-for column in datetime_columns:
-    all_df[column] = pd.to_datetime(all_df[column])
-
-# Filter data
-min_date = all_df["order_date"].min()
-max_date = all_df["order_date"].max()
-
-with st.sidebar:
-    # Menambahkan logo perusahaan
-    st.image("https://github.com/dicodingacademy/assets/raw/main/logo.png")
-    
-    # Mengambil start_date & end_date dari date_input
-    start_date, end_date = st.date_input(
-        label='Rentang Waktu',min_value=min_date,
-        max_value=max_date,
-        value=[min_date, max_date]
-    )
-
-main_df = all_df[(all_df["order_date"] >= str(start_date)) & 
-                (all_df["order_date"] <= str(end_date))]
-
-# st.dataframe(main_df)
-
-# # Menyiapkan berbagai dataframe
-daily_orders_df = create_daily_orders_df(main_df)
-sum_order_items_df = create_sum_order_items_df(main_df)
-bygender_df = create_bygender_df(main_df)
-byage_df = create_byage_df(main_df)
-bystate_df = create_bystate_df(main_df)
-rfm_df = create_rfm_df(main_df)
-
-
-# plot number of daily orders (2021)
-st.header('Dicoding Collection Dashboard :sparkles:')
-st.subheader('Daily Orders')
-
-col1, col2 = st.columns(2)
-
-with col1:
-    total_orders = daily_orders_df.order_count.sum()
-    st.metric("Total orders", value=total_orders)
-
-with col2:
-    total_revenue = format_currency(daily_orders_df.revenue.sum(), "AUD", locale='es_CO') 
-    st.metric("Total Revenue", value=total_revenue)
-
-fig, ax = plt.subplots(figsize=(16, 8))
-ax.plot(
-    daily_orders_df["order_date"],
-    daily_orders_df["order_count"],
-    marker='o', 
-    linewidth=2,
-    color="#90CAF9"
+# Sidebar controls
+st.sidebar.header("Filters")
+min_date = all_df["datetime"].min().date()
+max_date = all_df["datetime"].max().date()
+start_date, end_date = st.sidebar.date_input(
+    "Rentang Waktu",
+    value=[min_date, max_date],
+    min_value=min_date,
+    max_value=max_date
 )
-ax.tick_params(axis='y', labelsize=20)
-ax.tick_params(axis='x', labelsize=15)
+time_level = st.sidebar.selectbox("Level waktu agregasi", options=["day","month","year"], index=1)
 
+# otomatis list polutan yang ada
+available_pollutants = [c for c in ["PM2.5","PM10","SO2","NO2","CO","O3"] if c in all_df.columns]
+pollutant_sel = st.sidebar.multiselect("Pilih polutan (kosong = semua)", options=available_pollutants, default=available_pollutants[:2])
+
+# Filter dataframe by date range
+mask = (all_df["datetime"].dt.date >= start_date) & (all_df["datetime"].dt.date <= end_date)
+main_df = all_df.loc[mask].copy()
+
+# Aggregation
+agg_df = create_pollutant_mean_df(main_df, time_level=time_level, pollutant_cols=pollutant_sel if pollutant_sel else None)
+
+#Visualisasi Dashboard
+st.title("Proyek Data Analisis — Air Quality Kota Dongsi (2013-2016) 🌤️")
+st.markdown(f"Periode dipilih: **{start_date}** sampai **{end_date}** — Rekaman: **{len(main_df):,}**")
+
+# Plot: garis rata-rata polutan (time series)
+st.subheader("Trend Rata-rata Polutan 📊")
+fig, ax = plt.subplots(figsize=(12,5))
+mean_cols = [c for c in agg_df.columns if c.endswith("_mean")]
+for col in mean_cols:
+    sns.lineplot(data=agg_df, x="datetime", y=col, marker="o", label=col.replace("_mean",""), ax=ax)
+ax.set_xlabel("Waktu")
+ax.set_ylabel("Konsentrasi Polutan")
+ax.legend(title="")
+ax.grid(True, linestyle="--", alpha=0.5)
+plt.xticks(rotation=25)
 st.pyplot(fig)
 
+# Plot: rata-rata per tahun (jika ada)
+if "PM2.5" in all_df.columns or "PM10" in all_df.columns:
+    st.subheader("Rata-rata Tahunan PM2.5 & PM10")
+    yearly = create_pollutant_mean_df(main_df, time_level="year", pollutant_cols=[c for c in ["PM2.5","PM10"] if c in main_df.columns])
+    st.dataframe(yearly.head())
+    fig2, ax2 = plt.subplots(figsize=(10,4))
+    if "PM2.5_mean" in yearly.columns:
+        sns.lineplot(data=yearly, x="datetime", y="PM2.5_mean", marker="o", label="PM2.5", ax=ax2)
+    if "PM10_mean" in yearly.columns:
+        sns.lineplot(data=yearly, x="datetime", y="PM10_mean", marker="o", label="PM10", ax=ax2)
+    ax2.set_xlabel("Waktu"); ax2.set_ylabel("Konsentrasi (µg/m³)")
+    ax2.grid(True, linestyle="--", alpha=0.5)
+    st.pyplot(fig2)
 
-# Product performance
-st.subheader("Best & Worst Performing Product")
+# Korelasi
+st.subheader("Korelasi Singkat Antar Variabel Secara Keseluruhan 🔗")
+corr_cols = [c for c in ["PM2.5","PM10","SO2","NO2","CO","O3","TEMP","WSPM"] if c in main_df.columns]
+if len(corr_cols) >= 2:
+    corr = main_df[corr_cols].corr()
+    figc, axc = plt.subplots(figsize=(8,6))
+    sns.heatmap(corr, annot=True, fmt=".2f", cmap="coolwarm", ax=axc)
+    axc.set_title("Korelasi")
+    st.pyplot(figc)
+else:
+    st.info("Tidak cukup kolom numerik untuk menghitung korelasi.")
 
-fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(35, 15))
+# Analisis Airflow (selalu tampil, fixed bins & labels)
+st.subheader("Analisis Polutan berdasarkan Kategori Kecepatan Angin (WSPM) 💨")
 
-colors = ["#90CAF9", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3"]
+# Parameter label untuk kategori
+WSPM_BINS = [0, 1, 3, 5, 10]
+WSPM_LABELS = ["Tenang", "Lemah", "Sedang", "Kuat"]
 
-sns.barplot(x="quantity_x", y="product_name", data=sum_order_items_df.head(5), palette=colors, ax=ax[0])
-ax[0].set_ylabel(None)
-ax[0].set_xlabel("Number of Sales", fontsize=30)
-ax[0].set_title("Best Performing Product", loc="center", fontsize=50)
-ax[0].tick_params(axis='y', labelsize=35)
-ax[0].tick_params(axis='x', labelsize=30)
-
-sns.barplot(x="quantity_x", y="product_name", data=sum_order_items_df.sort_values(by="quantity_x", ascending=True).head(5), palette=colors, ax=ax[1])
-ax[1].set_ylabel(None)
-ax[1].set_xlabel("Number of Sales", fontsize=30)
-ax[1].invert_xaxis()
-ax[1].yaxis.set_label_position("right")
-ax[1].yaxis.tick_right()
-ax[1].set_title("Worst Performing Product", loc="center", fontsize=50)
-ax[1].tick_params(axis='y', labelsize=35)
-ax[1].tick_params(axis='x', labelsize=30)
-
-st.pyplot(fig)
-
-# customer demographic
-st.subheader("Customer Demographics")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    fig, ax = plt.subplots(figsize=(20, 10))
-
-    sns.barplot(
-        y="customer_count", 
-        x="gender",
-        data=bygender_df.sort_values(by="customer_count", ascending=False),
-        palette=colors,
-        ax=ax
-    )
-    ax.set_title("Number of Customer by Gender", loc="center", fontsize=50)
-    ax.set_ylabel(None)
-    ax.set_xlabel(None)
-    ax.tick_params(axis='x', labelsize=35)
-    ax.tick_params(axis='y', labelsize=30)
-    st.pyplot(fig)
-
-with col2:
-    fig, ax = plt.subplots(figsize=(20, 10))
+if "WSPM" not in main_df.columns:
+    st.info("Kolom 'WSPM' tidak ditemukan di dataset — tidak dapat membuat kategori airflow.")
+else:
+    default_pol = [c for c in ["PM2.5", "NO2"] if c in main_df.columns]
+    polutan_for_airflow = st.multiselect("Pilih polutan untuk analisis airflow:", options=available_pollutants, default=default_pol)
     
-    colors = ["#D3D3D3", "#90CAF9", "#D3D3D3", "#D3D3D3", "#D3D3D3"]
+    if not polutan_for_airflow:
+        st.warning("Pilih minimal satu polutan untuk analisis.")
+    else:
+        tmp = main_df[["WSPM"] + polutan_for_airflow].copy()
+        tmp = tmp.dropna(subset=["WSPM"])
 
-    sns.barplot(
-        y="customer_count", 
-        x="age_group",
-        data=byage_df.sort_values(by="age_group", ascending=False),
-        palette=colors,
-        ax=ax
-    )
-    ax.set_title("Number of Customer by Age", loc="center", fontsize=50)
-    ax.set_ylabel(None)
-    ax.set_xlabel(None)
-    ax.tick_params(axis='x', labelsize=35)
-    ax.tick_params(axis='y', labelsize=30)
-    st.pyplot(fig)
+        # gunakan bins & labels yang tetap
+        tmp["wind_category"] = pd.cut(tmp["WSPM"], bins=WSPM_BINS, labels=WSPM_LABELS, include_lowest=True)
 
-fig, ax = plt.subplots(figsize=(20, 10))
-colors = ["#90CAF9", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3"]
-sns.barplot(
-    x="customer_count", 
-    y="state",
-    data=bystate_df.sort_values(by="customer_count", ascending=False),
-    palette=colors,
-    ax=ax
-)
-ax.set_title("Number of Customer by States", loc="center", fontsize=30)
-ax.set_ylabel(None)
-ax.set_xlabel(None)
-ax.tick_params(axis='y', labelsize=20)
-ax.tick_params(axis='x', labelsize=15)
-st.pyplot(fig)
+        airflow_cluster = tmp.groupby("wind_category", observed=True)[polutan_for_airflow].mean().reset_index()
 
+        st.markdown("**Rata-rata polutan per kategori kecepatan angin**")
+        st.dataframe(airflow_cluster.style.format(precision=2))
 
-# Best Customer Based on RFM Parameters
-st.subheader("Best Customer Based on RFM Parameters")
+        # Plot: bar chart per polutan (horizontal)
+        fig_a, axes = plt.subplots(nrows=1, ncols=len(polutan_for_airflow), figsize=(6*len(polutan_for_airflow), 4), constrained_layout=True)
+        if len(polutan_for_airflow) == 1:
+            axes = [axes]
+        palette = sns.color_palette("muted")
+        for ax, pol, pal in zip(axes, polutan_for_airflow, palette):
+            sns.barplot(data=airflow_cluster.sort_values(by=pol), x=pol, y="wind_category", ax=ax, palette=[pal])
+            ax.set_xlabel(f"Rata-rata {pol}")
+            ax.set_ylabel("")
+            ax.set_title(pol)
+        st.pyplot(fig_a)
 
-col1, col2, col3 = st.columns(3)
+        # Ringkasan: kategori tertinggi per polutan
+        summary = []
+        for pol in polutan_for_airflow:
+            if airflow_cluster[pol].dropna().empty:
+                continue
+            max_idx = airflow_cluster[pol].idxmax()
+            max_row = airflow_cluster.loc[max_idx]
+            summary.append(f"- **{pol}** terbesar pada kategori **{max_row['wind_category']}**: {max_row[pol]:.2f}")
+        if summary:
+            st.markdown("**Ringkasan:**")
+            for s in summary:
+                st.markdown(s)
 
-with col1:
-    avg_recency = round(rfm_df.recency.mean(), 1)
-    st.metric("Average Recency (days)", value=avg_recency)
-
-with col2:
-    avg_frequency = round(rfm_df.frequency.mean(), 2)
-    st.metric("Average Frequency", value=avg_frequency)
-
-with col3:
-    avg_frequency = format_currency(rfm_df.monetary.mean(), "AUD", locale='es_CO') 
-    st.metric("Average Monetary", value=avg_frequency)
-
-fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(35, 15))
-colors = ["#90CAF9", "#90CAF9", "#90CAF9", "#90CAF9", "#90CAF9"]
-
-sns.barplot(y="recency", x="customer_id", data=rfm_df.sort_values(by="recency", ascending=True).head(5), palette=colors, ax=ax[0])
-ax[0].set_ylabel(None)
-ax[0].set_xlabel("customer_id", fontsize=30)
-ax[0].set_title("By Recency (days)", loc="center", fontsize=50)
-ax[0].tick_params(axis='y', labelsize=30)
-ax[0].tick_params(axis='x', labelsize=35)
-
-sns.barplot(y="frequency", x="customer_id", data=rfm_df.sort_values(by="frequency", ascending=False).head(5), palette=colors, ax=ax[1])
-ax[1].set_ylabel(None)
-ax[1].set_xlabel("customer_id", fontsize=30)
-ax[1].set_title("By Frequency", loc="center", fontsize=50)
-ax[1].tick_params(axis='y', labelsize=30)
-ax[1].tick_params(axis='x', labelsize=35)
-
-sns.barplot(y="monetary", x="customer_id", data=rfm_df.sort_values(by="monetary", ascending=False).head(5), palette=colors, ax=ax[2])
-ax[2].set_ylabel(None)
-ax[2].set_xlabel("customer_id", fontsize=30)
-ax[2].set_title("By Monetary", loc="center", fontsize=50)
-ax[2].tick_params(axis='y', labelsize=30)
-ax[2].tick_params(axis='x', labelsize=35)
-
-st.pyplot(fig)
-
-st.caption('Copyright © Dicoding 2023')
+# Footer
+st.caption("Dashboard sederhana — Air Quality Dataset di Kota Dongsi pada tahun 2013-2016 © Tony Mardyansyah")
